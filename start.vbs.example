@@ -1,0 +1,2 @@
+Set ws = CreateObject("WScript.Shell")
+ws.Run "msedge --app=code.html --edge-kiosk", 1, False
