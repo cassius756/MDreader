@@ -585,6 +585,7 @@
     let folderFiles = [];       // [{name, path, file, isMd}]
     let sidebarOpen = false;
     let markedReady = false;
+    let katexReady = false;
     let filterText = '';
     let folderExpandedState = {};  // 记录文件夹展开状态
     let contextTargetIndex = -1;   // 右键菜单目标文件索引
@@ -621,6 +622,18 @@
       });
     }
 
+    /* 加载样式表（KaTeX 需要 CSS，loadScript 只能加载 JS） */
+    function loadStyle(href) {
+      return new Promise((resolve, reject) => {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = href;
+        l.onload = resolve;
+        l.onerror = reject;
+        document.head.appendChild(l);
+      });
+    }
+
     /* ===== 加载 mermaid.js ===== */
     (async function loadMermaid() {
       const sources = [
@@ -642,6 +655,28 @@
       }
     })();
 
+    /* ===== 加载 katex.js（数学公式渲染） ===== */
+    /* 加载顺序：CSS → 核心 JS → auto-render 扩展。三者均本地优先，失败回退 CDN。 */
+    (async function loadKatex() {
+      const baseSources = [
+        '',                                              // 本地文件
+        'https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/' // jsDelivr CDN
+      ];
+      for (const base of baseSources) {
+        try {
+          await loadStyle(base + 'katex.min.css');
+          await loadScript(base + 'katex.min.js');
+          await loadScript(base + 'contrib/auto-render.min.js');
+          if (typeof katex !== 'undefined' && typeof renderMathInElement !== 'undefined') {
+            katexReady = true;
+            return;
+          }
+        } catch { /* 尝试下一个源 */ }
+      }
+      // 全部失败：静默降级，公式以原始文本显示
+      katexReady = false;
+    })();
+
     /* ===== 工具函数 ===== */
     function isMd(name) {
       const ext = name.split('.').pop().toLowerCase();
@@ -661,6 +696,7 @@
         if (markedReady) {
           contentArea.innerHTML = marked.parse(text);
           renderMermaidDiagrams();
+          renderMath();
         } else {
           contentArea.innerHTML = simpleMarkdown(text);
         }
@@ -715,6 +751,28 @@
         mermaid.run({ nodes: document.querySelectorAll('.mermaid') });
       } catch(e) {
         console.warn('Mermaid 渲染失败:', e);
+      }
+    }
+
+    /* ===== 数学公式渲染（KaTeX auto-render） ===== */
+    /* 在 marked 输出的 DOM 上扫描 $...$ / $$...$$ / \(...\) / \[...\] 分隔符并就地渲染。
+       必须在 renderMermaidDiagrams 之后调用，且 ignoredTags 排除 pre/code，
+       以免代码块或 Mermaid 源码中的 $ 被误判为公式。 */
+    function renderMath() {
+      if (!katexReady || typeof renderMathInElement === 'undefined') return;
+      try {
+        renderMathInElement(contentArea, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\[', right: '\\]', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false }
+          ],
+          throwOnError: false,
+          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option']
+        });
+      } catch (e) {
+        console.warn('公式渲染失败:', e);
       }
     }
 
