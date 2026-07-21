@@ -256,6 +256,15 @@
     .markdown-body p { margin-bottom: 16px; }
     .markdown-body a { color: var(--accent); text-decoration: none; }
     .markdown-body a:hover { text-decoration: underline; }
+    /* 外部链接后缀 ↗，提示用户点击会离开阅读器（参考 GitHub 风格） */
+    .markdown-body a[href^="http"]::after,
+    .markdown-body a[href^="//"]::after {
+      content: " \2197";
+      font-size: 0.85em;
+      color: var(--text-muted);
+      text-decoration: none;
+      opacity: 0.7;
+    }
     .markdown-body strong { font-weight: 600; }
     .markdown-body em { font-style: italic; }
     .markdown-body del { text-decoration: line-through; color: var(--text-muted); }
@@ -685,6 +694,59 @@
     function isTextFile(name) {
       const ext = name.split('.').pop().toLowerCase();
       return ext === 'md' || ext === 'markdown' || ext === 'txt';
+    }
+
+    /* ===== 链接解析工具（文件间跳转用） ===== */
+    /* 判断是否为外部 URL（含协议或协议相对路径 // ） */
+    function isExternalUrl(href) {
+      return /^(https?:|mailto:|tel:|ftp:|ftps:|data:|blob:|\/\/)/i.test(href);
+    }
+
+    /* 将相对链接解析为 folderFiles 中的索引；找不到返回 -1。
+       以当前文件所在目录为起点，逐段应用 ./ ../ 等。 */
+    function resolveInternalLink(href) {
+      if (currentFileIndex < 0 || folderFiles.length === 0) return -1;
+      // 拆分出文件路径部分（去掉 #anchor 和 ?query）
+      var rawPath = href.split('#')[0].split('?')[0];
+      if (!rawPath) return -1;
+      try { rawPath = decodeURIComponent(rawPath); } catch (e) { /* 保留原值 */ }
+
+      // 当前文件所在目录作为基准
+      var parts = folderFiles[currentFileIndex].path.split('/');
+      parts.pop();   // 去掉文件名，剩下目录段
+      var segs = rawPath.split('/');
+      for (var i = 0; i < segs.length; i++) {
+        var s = segs[i];
+        if (s === '' || s === '.') continue;
+        if (s === '..') { parts.pop(); continue; }
+        parts.push(s);
+      }
+      return findFileIndex(parts.join('/'));
+    }
+
+    /* 在 folderFiles 中查找匹配项：精确 → 忽略大小写 → 后缀 → 同名兜底 */
+    function findFileIndex(resolved) {
+      var i, p;
+      // 1. 精确匹配
+      for (i = 0; i < folderFiles.length; i++) {
+        if (folderFiles[i].path === resolved) return i;
+      }
+      // 2. 忽略大小写
+      var rl = resolved.toLowerCase();
+      for (i = 0; i < folderFiles.length; i++) {
+        if (folderFiles[i].path.toLowerCase() === rl) return i;
+      }
+      // 3. 后缀匹配（兼容链接是否带根目录名的不同写法）
+      for (i = 0; i < folderFiles.length; i++) {
+        p = folderFiles[i].path;
+        if (p === resolved || p.endsWith('/' + resolved)) return i;
+      }
+      // 4. 仅按文件名兜底（最宽松）
+      var base = resolved.split('/').pop().toLowerCase();
+      for (i = 0; i < folderFiles.length; i++) {
+        if (folderFiles[i].name.toLowerCase() === base) return i;
+      }
+      return -1;
     }
 
     /* 渲染文件内容到主区域 */
@@ -1288,6 +1350,37 @@
     /* 展开/折叠全部 */
     document.getElementById('btnExpandAll').addEventListener('click', expandAllFolders);
     document.getElementById('btnCollapseAll').addEventListener('click', collapseAllFolders);
+
+    /* ===== 内容区链接点击：内部跳转 / 外部新窗口 ===== */
+    /* 委托式监听，同时覆盖 marked.parse 与 simpleMarkdown 两种渲染输出 */
+    contentWrap.addEventListener('click', function(e) {
+      var a = e.target.closest('a');
+      if (!a || !a.getAttribute('href')) return;
+      var href = a.getAttribute('href');
+
+      // 1. 文档内锚点（#xxx）：交给浏览器默认滚动
+      if (href.charAt(0) === '#') return;
+
+      // 2. 外部链接：阻止本窗口跳转，改在新窗口/标签打开
+      if (isExternalUrl(href)) {
+        e.preventDefault();
+        window.open(href, '_blank', 'noopener,noreferrer');
+        return;
+      }
+
+      // 3. 内部文件链接：解析为目标索引并切换
+      var idx = resolveInternalLink(href);
+      if (idx >= 0) {
+        e.preventDefault();
+        switchToFile(idx);
+      } else if (currentFileIndex < 0) {
+        e.preventDefault();
+        showToast('请先打开文件夹以使用文件间链接');
+      } else {
+        e.preventDefault();
+        showToast('找不到文件：' + href.split('#')[0]);
+      }
+    });
 
     /* 右键菜单操作 */
     document.getElementById('ctxCopyName').addEventListener('click', function() {
