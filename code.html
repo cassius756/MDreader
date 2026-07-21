@@ -134,6 +134,122 @@
       flex-shrink: 0;
     }
 
+    /* ===== 侧栏：最近打开区域 ===== */
+    .sidebar-recent {
+      flex-shrink: 0;
+      max-height: 220px;
+      overflow-y: auto;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .sidebar-recent::-webkit-scrollbar { width: 5px; }
+    .sidebar-recent::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    .sidebar-recent-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px 4px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 0.02em;
+    }
+    .btn-recent-clear {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,0.35);
+      font-size: 11px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-family: inherit;
+    }
+    .btn-recent-clear:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.08); }
+
+    .recent-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px 6px 14px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .recent-item:hover { background: var(--bg-sidebar-hover); }
+    .recent-icon { flex-shrink: 0; font-size: 13px; }
+    .recent-main { flex: 1; min-width: 0; }
+    .recent-name {
+      font-size: 12px;
+      color: rgba(255,255,255,0.85);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .recent-meta {
+      font-size: 10px;
+      color: rgba(255,255,255,0.35);
+      margin-top: 1px;
+    }
+    .recent-del {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: rgba(255,255,255,0.3);
+      font-size: 15px;
+      line-height: 1;
+      padding: 0 4px;
+      border-radius: 3px;
+      opacity: 0;
+      transition: opacity 0.1s, color 0.1s;
+    }
+    .recent-item:hover .recent-del { opacity: 1; }
+    .recent-del:hover { color: #fff; background: rgba(255,255,255,0.12); }
+
+    /* ===== 欢迎页：最近打开 ===== */
+    .welcome-recent {
+      margin-top: 32px;
+      max-width: 460px;
+      width: 100%;
+      text-align: left;
+    }
+    .welcome-recent h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      text-align: center;
+      letter-spacing: 0.02em;
+    }
+    .welcome-recent-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .welcome-recent-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: border-color 0.12s, transform 0.12s;
+    }
+    .welcome-recent-item:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .welcome-recent-item .recent-icon { font-size: 18px; }
+    .welcome-recent-item .recent-name {
+      font-size: 14px;
+      color: var(--text);
+      font-weight: 500;
+    }
+    .welcome-recent-item .recent-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
     /* ===== 主区域 ===== */
     .main {
       flex: 1;
@@ -507,6 +623,13 @@
       </button>
     </div>
     <div class="file-list" id="fileList" role="tree" aria-label="文件树"></div>
+    <div class="sidebar-recent" id="sidebarRecent" style="display:none">
+      <div class="sidebar-recent-head">
+        <span>最近打开</span>
+        <button class="btn-recent-clear" id="btnClearRecent" title="清空最近列表">清空</button>
+      </div>
+      <div class="recent-list" id="recentList"></div>
+    </div>
     <div class="sidebar-foot" id="sidebarFoot"></div>
   </aside>
 
@@ -547,6 +670,10 @@
             拖拽文件到此窗口，或使用工具栏打开<br>
             <kbd>Ctrl+O</kbd> 打开文件 &nbsp; <kbd>Ctrl+Shift+O</kbd> 打开文件夹
           </p>
+          <div class="welcome-recent" id="welcomeRecent" style="display:none">
+            <h3>最近打开</h3>
+            <div class="welcome-recent-list" id="welcomeRecentList"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -599,6 +726,13 @@
     let folderExpandedState = {};  // 记录文件夹展开状态
     let contextTargetIndex = -1;   // 右键菜单目标文件索引
     let contextTargetName = '';    // 右键菜单目标文件名
+
+    /* ===== 最近打开功能状态 ===== */
+    /* FS Access API 仅 Chrome/Edge 支持；其他浏览器降级为「记录名称 + 手动重选」 */
+    const fsAccessSupported = ('showDirectoryPicker' in window) && ('showOpenFilePicker' in window);
+    let recentItems = [];                  // 内存缓存，由 IndexedDB 加载
+    let lastDirHandle = null;              // FS Access 打开流程注入，finishOpenFolder 读取
+    let lastFileHandle = null;             // 同上，openSingleFile 读取
 
     /* ===== 加载 marked.js ===== */
     (async function loadMarked() {
@@ -749,6 +883,259 @@
       return -1;
     }
 
+    /* ===== 最近打开：IndexedDB 持久化层 ===== */
+    /* FileSystemHandle 只能存 IndexedDB（localStorage 无法序列化 handle）。
+       所有方法返回 Promise，失败时调用方静默降级。 */
+    const RECENT_DB_NAME = 'md-reader';
+    const RECENT_DB_VERSION = 1;
+    const RECENT_STORE = 'recent';
+    const MAX_RECENT = 10;
+
+    function dbOpen() {
+      return new Promise(function(resolve, reject) {
+        var req = indexedDB.open(RECENT_DB_NAME, RECENT_DB_VERSION);
+        req.onupgradeneeded = function() {
+          var db = req.result;
+          if (!db.objectStoreNames.contains(RECENT_STORE)) {
+            db.createObjectStore(RECENT_STORE, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = function() { resolve(req.result); };
+        req.onerror = function() { reject(req.error); };
+      });
+    }
+
+    /* 新增/更新一条记录（按 id 去重，更新时间戳）；超容量删最旧。
+       put/getAll/delete 在同一事务内执行，getAll 能立即看到 put 的结果。 */
+    function dbAdd(entry) {
+      return dbOpen().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx = db.transaction(RECENT_STORE, 'readwrite');
+          var store = tx.objectStore(RECENT_STORE);
+          store.put(entry);
+          var allReq = store.getAll();
+          allReq.onsuccess = function() {
+            var list = allReq.result.slice().sort(function(a, b) {
+              return b.openedAt - a.openedAt;
+            });
+            var toRemove = list.slice(MAX_RECENT);
+            toRemove.forEach(function(item) { store.delete(item.id); });
+          };
+          allReq.onerror = function() { /* 继续提交事务 */ };
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { reject(tx.error); };
+        });
+      }).catch(function() { /* 静默 */ });
+    }
+
+    function dbGetAll() {
+      return dbOpen().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx = db.transaction(RECENT_STORE, 'readonly');
+          var req = tx.objectStore(RECENT_STORE).getAll();
+          req.onsuccess = function() {
+            resolve(req.result.sort(function(a, b) { return b.openedAt - a.openedAt; }));
+          };
+          req.onerror = function() { reject(req.error); };
+        });
+      });
+    }
+
+    function dbRemove(id) {
+      return dbOpen().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx = db.transaction(RECENT_STORE, 'readwrite');
+          tx.objectStore(RECENT_STORE).delete(id);
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { reject(tx.error); };
+        });
+      }).catch(function() { /* 静默 */ });
+    }
+
+    function dbClearAll() {
+      return dbOpen().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx = db.transaction(RECENT_STORE, 'readwrite');
+          tx.objectStore(RECENT_STORE).clear();
+          tx.oncomplete = function() { resolve(); };
+          tx.onerror = function() { reject(tx.error); };
+        });
+      }).catch(function() { /* 静默 */ });
+    }
+
+    /* ===== 最近打开：FS Access API 目录遍历 ===== */
+    /* 遍历 FileSystemDirectoryHandle，产出与现有 folderFiles 兼容的数组 */
+    async function readDirViaHandle(dirHandle) {
+      var rootName = dirHandle.name;
+      var results = [];
+
+      async function processDir(handle, pathPrefix) {
+        for await (var entry of handle.values()) {
+          var currentPath = pathPrefix ? (pathPrefix + '/' + entry.name) : entry.name;
+          if (entry.kind === 'file') {
+            try {
+              var file = await entry.getFile();
+              if (isTextFile(file.name)) {
+                results.push({
+                  name: file.name,
+                  path: rootName + '/' + currentPath,
+                  file: file,
+                  isMd: isMd(file.name)
+                });
+              }
+            } catch (e) { /* 跳过无法读取的文件 */ }
+          } else if (entry.kind === 'directory') {
+            await processDir(entry, currentPath);
+          }
+        }
+      }
+
+      await processDir(dirHandle, '');
+      return results;
+    }
+
+    /* ===== 最近打开：重打开逻辑 ===== */
+    async function reopenRecent(entry) {
+      if (entry.kind === 'directory' && entry.handle) {
+        // FS Access 路径：先查权限，必要时请求
+        try {
+          var perm = await entry.handle.queryPermission({ mode: 'read' });
+          if (perm !== 'granted') {
+            var req = await entry.handle.requestPermission({ mode: 'read' });
+            if (req !== 'granted') { showToast('已拒绝访问权限'); return; }
+          }
+          var files = await readDirViaHandle(entry.handle);
+          if (files.length === 0) { showToast('文件夹中没有 .md 或 .txt 文件'); return; }
+          lastDirHandle = entry.handle;
+          folderFiles = files.sort(function(a, b) { return a.path.localeCompare(b.path); });
+          finishOpenFolder();
+          showToast('已打开：' + entry.name);
+        } catch (e) {
+          showToast('打开失败，文件夹可能已移动或删除');
+        }
+      } else if (entry.kind === 'file' && entry.handle) {
+        try {
+          var fp = await entry.handle.queryPermission({ mode: 'read' });
+          if (fp !== 'granted') {
+            var fr = await entry.handle.requestPermission({ mode: 'read' });
+            if (fr !== 'granted') { showToast('已拒绝访问权限'); return; }
+          }
+          var file = await entry.handle.getFile();
+          lastFileHandle = entry.handle;
+          openSingleFile(file);
+        } catch (e) {
+          showToast('打开失败，文件可能已移动或删除');
+        }
+      } else {
+        // 降级路径：无 handle（不支持 FS Access 或来自 input/drop 流）
+        showToast('请重新选择"' + entry.name + '"');
+        (entry.kind === 'directory' ? folderInput : fileInput).click();
+      }
+    }
+
+    /* ===== 最近打开：相对时间格式化 ===== */
+    function formatRelativeTime(ts) {
+      var diff = Date.now() - ts;
+      var sec = Math.floor(diff / 1000);
+      if (sec < 60) return '刚刚';
+      var min = Math.floor(sec / 60);
+      if (min < 60) return min + ' 分钟前';
+      var hr = Math.floor(min / 60);
+      if (hr < 24) return hr + ' 小时前';
+      var day = Math.floor(hr / 24);
+      if (day === 1) return '昨天';
+      if (day < 7) return day + ' 天前';
+      var d = new Date(ts);
+      var m = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      return d.getFullYear() + '-' + m + '-' + dd;
+    }
+
+    /* ===== 最近打开：UI 渲染（侧栏底部 + 欢迎页） ===== */
+    function refreshRecentUI() {
+      var sidebarRecent = document.getElementById('sidebarRecent');
+      var recentList = document.getElementById('recentList');
+      var welcomeRecent = document.getElementById('welcomeRecent');
+      var welcomeRecentList = document.getElementById('welcomeRecentList');
+
+      // 侧栏列表
+      if (sidebarRecent) {
+        if (recentItems.length === 0) {
+          sidebarRecent.style.display = 'none';
+        } else {
+          sidebarRecent.style.display = 'block';
+          recentList.innerHTML = '';
+          recentItems.forEach(function(item) {
+            recentList.appendChild(buildRecentItem(item, true));
+          });
+        }
+      }
+
+      // 欢迎页列表
+      if (welcomeRecent) {
+        if (recentItems.length === 0) {
+          welcomeRecent.style.display = 'none';
+        } else {
+          welcomeRecent.style.display = 'block';
+          welcomeRecentList.innerHTML = '';
+          recentItems.forEach(function(item) {
+            welcomeRecentList.appendChild(buildRecentItem(item, false));
+          });
+        }
+      }
+    }
+
+    /* 构建单条最近项 DOM。sidebar=true 显示删除按钮和紧凑时间，否则卡片样式 */
+    function buildRecentItem(item, sidebar) {
+      var row = document.createElement('div');
+      row.className = sidebar ? 'recent-item' : 'welcome-recent-item';
+
+      var icon = document.createElement('span');
+      icon.className = 'recent-icon';
+      icon.textContent = item.kind === 'directory' ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+
+      var main = document.createElement('div');
+      main.className = 'recent-main';
+
+      var name = document.createElement('div');
+      name.className = 'recent-name';
+      name.textContent = item.name;
+      name.title = item.name;
+
+      var meta = document.createElement('div');
+      meta.className = 'recent-meta';
+      var metaText = formatRelativeTime(item.openedAt);
+      if (item.kind === 'directory') metaText += ' · ' + item.fileCount + ' 个文件';
+      if (!item.handle && fsAccessSupported === false) metaText += ' · 需重选';
+      meta.textContent = metaText;
+
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      row.appendChild(icon);
+      row.appendChild(main);
+
+      if (sidebar) {
+        var del = document.createElement('button');
+        del.className = 'recent-del';
+        del.title = '从列表移除';
+        del.innerHTML = '&times;';
+        del.addEventListener('click', function(e) {
+          e.stopPropagation();
+          dbRemove(item.id).then(function() {
+            return dbGetAll();
+          }).then(function(list) {
+            recentItems = list;
+            refreshRecentUI();
+          });
+        });
+        row.appendChild(del);
+      }
+
+      row.addEventListener('click', function() { reopenRecent(item); });
+      return row;
+    }
+
     /* 渲染文件内容到主区域 */
     function renderFile(text, filename) {
       if (welcomeView && welcomeView.parentNode) welcomeView.remove();
@@ -846,6 +1233,23 @@
         currentFileIndex = -1;
         folderFiles = [];
         clearActiveFile();
+
+        // 记录到「最近打开」
+        var handle = lastFileHandle;
+        lastFileHandle = null;
+        dbAdd({
+          id: 'file|' + file.name,
+          kind: 'file',
+          name: file.name,
+          handle: handle || null,
+          fileCount: 1,
+          openedAt: Date.now()
+        }).then(function() {
+          return dbGetAll();
+        }).then(function(list) {
+          recentItems = list;
+          refreshRecentUI();
+        });
       };
       reader.readAsText(file);
     }
@@ -881,6 +1285,23 @@
       renderFileList();
       showSidebar();
       switchToFile(0);
+
+      // 记录到「最近打开」
+      var handle = lastDirHandle;
+      lastDirHandle = null;   // 一次性消费
+      dbAdd({
+        id: 'directory|' + rootName,
+        kind: 'directory',
+        name: rootName,
+        handle: handle || null,
+        fileCount: folderFiles.length,
+        openedAt: Date.now()
+      }).then(function() {
+        return dbGetAll();
+      }).then(function(list) {
+        recentItems = list;
+        refreshRecentUI();
+      });
     }
 
     /* ===== 构建文件夹树 ===== */
@@ -1314,11 +1735,39 @@
     }
 
     /* ===== 事件绑定 ===== */
-    document.getElementById('btnOpenFile').addEventListener('click', function() {
-      fileInput.click();
+    document.getElementById('btnOpenFile').addEventListener('click', async function() {
+      if (fsAccessSupported) {
+        try {
+          var handles = await window.showOpenFilePicker({
+            multiple: false,
+            types: [{ description: 'Markdown / 文本', accept: { 'text/plain': ['.md', '.markdown', '.txt'] } }]
+          });
+          if (handles && handles.length > 0) {
+            var file = await handles[0].getFile();
+            lastFileHandle = handles[0];
+            openSingleFile(file);
+          }
+        } catch (e) { /* 用户取消，静默 */ }
+      } else {
+        fileInput.click();
+      }
     });
-    document.getElementById('btnOpenFolder').addEventListener('click', function() {
-      folderInput.click();
+    document.getElementById('btnOpenFolder').addEventListener('click', async function() {
+      if (fsAccessSupported) {
+        try {
+          var handle = await window.showDirectoryPicker();
+          var files = await readDirViaHandle(handle);
+          if (files.length === 0) {
+            showToast('文件夹中没有 .md 或 .txt 文件');
+            return;
+          }
+          lastDirHandle = handle;
+          folderFiles = files.sort(function(a, b) { return a.path.localeCompare(b.path); });
+          finishOpenFolder();
+        } catch (e) { /* 用户取消，静默 */ }
+      } else {
+        folderInput.click();
+      }
     });
     document.getElementById('btnToggleSidebar').addEventListener('click', toggleSidebar);
     document.getElementById('btnCollapseSidebar').addEventListener('click', hideSidebar);
@@ -1451,6 +1900,24 @@
         }
       }
     });
+
+    /* ===== 最近打开：清空按钮 + 应用启动加载 ===== */
+    var btnClearRecent = document.getElementById('btnClearRecent');
+    if (btnClearRecent) {
+      btnClearRecent.addEventListener('click', function() {
+        dbClearAll().then(function() {
+          recentItems = [];
+          refreshRecentUI();
+          showToast('已清空最近列表');
+        });
+      });
+    }
+
+    // 应用启动：异步加载最近列表并渲染（侧栏 + 欢迎页）
+    dbGetAll().then(function(list) {
+      recentItems = list;
+      refreshRecentUI();
+    }).catch(function() { /* IndexedDB 不可用时静默 */ });
   </script>
 </body>
 </html>
